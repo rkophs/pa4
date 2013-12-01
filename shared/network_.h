@@ -1,7 +1,3 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -11,91 +7,121 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-struct Connection {
-    int srcPort;
-    int dstPort;
-    char *srcAddr;
-    char *dstAddr;
-    char *alias;
-};
+#include "args_.h"
 
-void releaseConnection(struct Connection* c) {
-    if (c == NULL) {
-        return;
-    }
+//struct Connection {
+//    int srcPort; //Used by listeners
+//    int dstPort; //Used by connectors
+//    int sockfd; //Used by all
+//    char *remoteIP; //Used by connectors
+//    struct Connection *next;
+//};
 
-    if (c->srcAddr != NULL) {
-        free(c->srcAddr);
-        c->srcAddr = NULL;
-    }
-    if (c->dstAddr != NULL) {
-        free(c->dstAddr);
-        c->dstAddr = NULL;
-    }
-    if (c->alias != NULL) {
-        free(c->alias);
-        c->alias = NULL;
-    }
-    c->srcPort = 0;
-    c->srcPort = 0;
-
-    free(c);
-    c = NULL;
-}
-
-struct Connection *P2P(int srcPort, int dstPort,
-        char *srcAddr, int srcAddrLen,
-        char *dstAddr, int dstAddrLen) {
-
-    struct Connection *c;
-    if ((c = (struct Connection *) malloc(sizeof (struct Connection))) == NULL) {
-        releaseConnection(c);
-        return NULL;
-    }
-    c->srcPort = srcPort;
-    c->dstPort = dstPort;
-
-    if ((c->srcAddr = (char *) malloc(srcAddrLen + 1)) == NULL) {
-        releaseConnection(c);
-        return NULL;
-    }
-    bzero(c->srcAddr, sizeof (c->srcAddr));
-    strncpy(c->srcAddr, srcAddr, srcAddrLen);
-
-    if ((c->dstAddr = (char *) malloc(dstAddrLen + 1)) == NULL) {
-        releaseConnection(c);
-        return NULL;
-    }
-    bzero(c->dstAddr, sizeof (c->dstAddr));
-    strncpy(c->dstAddr, dstAddr, dstAddrLen);
-
-    return c;
-}
-
-struct Connection *P2S(int srcPort, int dstPort,
-        char *srcAddr, int srcAddrLen,
-        char *dstAddr, int dstAddrLen,
-        char *alias, int aliasLen) {
-
-    struct Connection *c;
-    if ((c = P2P(srcPort, dstPort, srcAddr, srcAddrLen,
-            dstAddr, dstAddrLen)) == NULL) {
-        return NULL;
-    }
-
-    if ((c->alias = (char *) malloc(aliasLen + 1)) == NULL) {
-        releaseConnection(c);
-        return NULL;
-    }
-    bzero(c->alias, sizeof (c->alias));
-    strncpy(c->alias, alias, aliasLen);
-    return c;
-}
+//void releaseConnection(struct Connection *c) {
+//    if (c == NULL) {
+//        return;
+//    }
+//    c->srcPort = -1;
+//    c->srcPort = -1;
+//    c->sockfd = -1;
+//
+//    if (c->remoteIP != NULL) {
+//        free(c->remoteIP);
+//        c->remoteIP = NULL;
+//    }
+//    free(c);
+//    c = NULL;
+//}
+//
+//void connectionRemove(struct Connection *c, int sockfd) {
+//    if (c == NULL || sockfd < 0) {
+//        return;
+//    }
+//
+//    struct Connection *it1 = NULL;
+//    struct Connection *it2 = c;
+//
+//    while (it2 != NULL) {
+//        if (it2->sockfd == sockfd) { //match
+//            if (it1 == NULL) { //Caught on first node
+//                it1 = it2->next;
+//                releaseConnection(it2);
+//            } else { //Caught on future nodes
+//                it1 = it2->next;
+//                releaseConnection(it2);
+//            }
+//            break;
+//        }
+//        it1 = it2;
+//        it2 = it2->next;
+//    }
+//    c = it1;
+//}
+//
+//void releaseConnections(struct Connection *c) {
+//    if (c == NULL) {
+//        return;
+//    }
+//
+//    struct Connection *tmp = NULL;
+//    struct Connection *it = c;
+//
+//    while (it != NULL) {
+//        tmp = it->next;
+//        releaseConnection(it);
+//        it = tmp;
+//    }
+//    c = NULL;
+//}
+//
+//void connectionAdd(struct Connection *pool,
+//        int srcPort, int dstPort, char *remoteIP, int remoteIPLen) {
+//
+//    struct Connection *c;
+//    if ((c = (struct Connection *) malloc(sizeof (struct Connection))) == NULL) {
+//        releaseConnection(c);
+//        return NULL;
+//    }
+//    c->srcPort = srcPort;
+//    c->dstPort = dstPort;
+//    c->sockfd = -1;
+//    c->remoteIP = NULL;
+//    c->next = NULL;
+//
+//    if (remoteIPLen > 0) {
+//        if ((c->remoteIP = (char *) malloc(remoteIPLen + 1)) == NULL) {
+//            releaseConnection(c);
+//            return NULL;
+//        }
+//        bzero(c->remoteIP, sizeof (c->remoteIP));
+//        strncpy(c->remoteIP, remoteIP, remoteIPLen);
+//    }
+//
+//    //Add new connection to the pool:
+//    if (pool == NULL) {
+//        pool = c;
+//    } else {
+//        struct Connection *it = pool;
+//        while (it->next != NULL) {
+//            it = it->next;
+//        }
+//        it->next = c;
+//    }
+//}
+//
+//int connectionRemoteIP(struct Connection* c, char *ip, int ipLen) {
+//    if ((c->remoteIP = (char *) malloc(ipLen + 1)) == NULL) {
+//        return -1;
+//    }
+//    bzero(c->remoteIP, sizeof (c->remoteIP));
+//    strncpy(c->remoteIP, ip, ipLen);
+//    return 0;
+//}
 
 /*
  * Bind a TCP listener that listens on any address via the connection src port
  */
-int bindListener(struct Connection *c) {
+int bindListener(int srcPort) {
 
     //Open socket:
     int sockfd;
@@ -113,21 +139,21 @@ int bindListener(struct Connection *c) {
     struct sockaddr_in srcAddr;
     bzero(&srcAddr, sizeof (srcAddr));
     srcAddr.sin_family = AF_INET;
-    srcAddr.sin_port = c->srcPort;
+    srcAddr.sin_port = srcPort;
     srcAddr.sin_addr.s_addr = INADDR_ANY;
     if (bind(sockfd, (struct sockaddr *) &srcAddr, sizeof (srcAddr)) < 0) {
         return -1;
     }
-    if (listen(sockfd, 20) < 0) { //Test this after all is working
+    if (listen(sockfd, 20) < 0) {
         return -1;
     }
     return sockfd;
 }
 
 /* 
- * Connect with the connection destination address and port
+ * Connect with the destination address and port (non-blocking)
  */
-int bindConnector(struct Connection *c) {
+int bindConnector(int dstPort, char *dstIP) {
 
     //Open socket:
     int sockfd;
@@ -145,8 +171,10 @@ int bindConnector(struct Connection *c) {
     struct sockaddr_in destAddr;
     bzero(&destAddr, sizeof (destAddr));
     destAddr.sin_family = AF_INET;
-    destAddr.sin_port = c->dstPort;
-    destAddr.sin_addr.s_addr = inet_addr(c->dstAddr);
+    destAddr.sin_port = dstPort;
+    if (dstIP != NULL) {
+        destAddr.sin_addr.s_addr = inet_addr(dstIP);
+    }
 
     if (connect(sockfd, (struct sockaddr *) &destAddr, sizeof (destAddr)) < 0) {
         return -1;
