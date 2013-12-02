@@ -51,7 +51,7 @@ void engineSendStatus(int sockfd, int ok) {
     char buff[buffSize];
     bzero(buff, buffSize);
     ok ? strcpy(buff, "OK      ") : strcpy(buff, "ERROR   ");
-    send(sockfd, &buff, strlen(buff), 0);
+    sendWrapper(sockfd, &buff, strlen(buff), 0);
 }
 
 void *engineSync(void *arg) {
@@ -96,11 +96,11 @@ void *engineThread(void *args) {
     setsockopt(newSock, SOL_SOCKET, SO_RCVTIMEO, (char *) &tv, sizeof (struct timeval));
 
     //Now get name and add appropriately to list of names:
-    int buffSize = 32;
+    int buffSize = 2048;
     char buff[buffSize];
     bzero(buff, buffSize);
     int len;
-    if ((len = recv(newSock, buff, sizeof (buff), 0)) > 0) {
+    if ((len = recvWrapper(newSock, buff, buffSize, 0)) > 0) {
         pthread_mutex_lock(&engineLock);
         int status = addSock(e, buff, len, newSock, pthread_self());
         pthread_mutex_unlock(&engineLock);
@@ -114,12 +114,18 @@ void *engineThread(void *args) {
             return;
         }
     }
+    
+//    //Get file listing from client:
+//    bzero(buff, buffSize);
+//    if((len = recvWrapper(newSock, buff, buffSize, 0)) > 0){
+//        printf("received: %s\n", buff);
+//    }
 
     //Now setup interaction loop:
     printf("Client with socket ID %i has entered\n", newSock);
     while (1) {
         bzero(buff, buffSize);
-        if ((len = recv(newSock, buff, buffSize, 0)) > 0) {
+        if ((len = recvWrapper(newSock, buff, buffSize, 0)) > 0) {
             if (!strncmp(buff, "LS        ", 8)) {
                 printf("LS received\n");
             } else if (!strncmp(buff, "GET     ", 8)) {

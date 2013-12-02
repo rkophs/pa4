@@ -55,17 +55,17 @@ int engineSendName(struct Engine *e) {
     char buff[buffSize];
     bzero(buff, buffSize);
     strncpy(buff, e->args->clientName, buffSize - 1);
-    return send(e->sockServer, &buff, strlen(buff), 0);
+    return sendWrapper(e->sockServer, &buff, strlen(buff), 0);
 }
 
-int engineRecvOK(struct Engine *e) {
+int engineRecvOK(int sockfd) {
 
     int buffSize = 32;
     char buff[buffSize];
     bzero(buff, buffSize);
 
     int len;
-    if ((len = recv(e->sockServer, buff, buffSize, 0)) > 0) {
+    if ((len = recvWrapper(sockfd, buff, buffSize, 0)) > 0) {
         printf("Server responded: %s\n", buff);
         if (!strncmp(buff, "ERROR   ", 8)) {
             printf("Name already exists in server's director...Closing...\n");
@@ -78,6 +78,26 @@ int engineRecvOK(struct Engine *e) {
 
 void *engineListenThread(void *arg) {
     struct Engine *e = arg;
+}
+
+int enginePipeLS(int sockfd){
+    int buffSize = 1024;
+    char buff[buffSize];
+    bzero(buff, buffSize);
+    FILE *fp;
+    fp = popen("/bin/ls .", "r");
+    if(fp == NULL){
+        printf("Failed to parse local file names...Closing...\n");
+        return -1;
+    }
+    int len;
+    if((len = fread(buff, sizeof(char), buffSize, fp)) < 0){
+        printf("Failed to parse local file names...Closing...\n");
+        pclose(fp);
+        return -1;
+    }
+    pclose(fp);
+    return sendWrapper(sockfd, &buff, len, 0);
 }
 
 int engineStart(struct Engine *e) {
@@ -104,14 +124,20 @@ int engineStart(struct Engine *e) {
     }
 
     //Receive response to server:
-    int status = engineRecvOK(e);
+    int status = engineRecvOK(e->sockServer);
     if (status < 0) {
         printf("Error getting response from server...Closing...\n");
         return -1;
     } else if (status == 0) {
         return -1;
     }
-
+    
+//    //Send file listing to server:
+//    if (enginePipeLS(e->sockServer) < 0) {
+//        printf("Error sending file listings to server..Closing...\n");
+//        return -1;
+//    }
+    
     return 1;
 }
 

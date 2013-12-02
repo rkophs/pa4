@@ -181,3 +181,11 @@ int bindConnector(int dstPort, char *dstIP) {
     }
     return sockfd;
 }
+
+ssize_t recvWrapper(int sockfd, void *buf, size_t len, int flags){
+    return recvWrapper(sockfd, buf, len, flags);
+}
+
+ssize_t sendWrapper(int sockfd, const void *buf, size_t len, int flags){
+    return send(sockfd, buf, len, flags);
+}
