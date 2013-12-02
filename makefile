@@ -4,4 +4,4 @@ all:
 	gcc -pthread -o thread thread.c
 
 clean:
-	rm -rf client/clientPFS server/server_PfS
+	rm -rf client/client_PFS server/server_PFS thread
