@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
@@ -180,4 +181,21 @@ int bindConnector(int dstPort, char *dstIP) {
         return -1;
     }
     return sockfd;
+}
+
+ssize_t recvDecrypt(int sockfd, void *buf, size_t len, int flags){
+    return recv(sockfd, buf, len, flags);
+}
+
+ssize_t sendEncrypt(int sockfd, void *buf, size_t len, int flags){
+    return send(sockfd, buf, len, flags);
+}
+
+int BUFF(char *buffer, int size, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    bzero(buffer, size);
+    int sizeUlt = vsprintf(buffer, format, args);
+    va_end(args);
+    return sizeUlt;
 }

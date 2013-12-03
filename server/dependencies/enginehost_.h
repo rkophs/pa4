@@ -7,6 +7,9 @@ struct Host {
     pthread_t tid;
     char *name;
     int sockfd;
+    //int fileCount;
+    //struct file *files;
+    char *files;
 };
 
 struct Engine {
@@ -19,6 +22,7 @@ struct Engine {
 struct EngineArgs {
     int newSock;
     struct Engine *e;
+    char *addr;
 };
 
 int nameExists(struct Engine *e, char *name, int size) {
@@ -40,9 +44,17 @@ void emptyHost(struct Engine *e, int it) {
     if (e->socks[it].name != NULL) {
         free(e->socks[it].name);
     }
+
+    //emptyHostFiles(&(e->socks[it]));
+    if(e->socks[it].files != NULL){
+        e->change = 1;
+        free(e->socks[it].files);
+        e->socks[it].files = NULL;
+    }
     e->socks[it].name = NULL;
     e->socks[it].sockfd = 0;
     e->socks[it].tid = -1;
+    //e->socks[it].fileCount = 0;
 }
 
 int initHost(struct Engine *e, int it, char * name, int nameSize, int sockfd, pthread_t tid) {
@@ -52,6 +64,7 @@ int initHost(struct Engine *e, int it, char * name, int nameSize, int sockfd, pt
     e->socks[it].name = NULL;
     e->socks[it].tid = -1;
     e->socks[it].sockfd = 0;
+    e->socks[it].files = NULL;
 
     int add = 0;
     if (nameSize > 0) {
@@ -61,7 +74,6 @@ int initHost(struct Engine *e, int it, char * name, int nameSize, int sockfd, pt
         bzero(e->socks[it].name, sizeof (e->socks[it].name));
         strncpy(e->socks[it].name, name, nameSize);
         add++;
-        e->change = 1;
     }
 
     if (sockfd > 0) {
@@ -110,10 +122,15 @@ int addThread(struct Engine *e, pthread_t tid) {
 }
 
 int delSock(struct Engine *e, int sockfd) {
+    if (e == NULL) {
+        return -1;
+    }
+    if (e->socks == NULL) {
+        return -1;
+    }
     int i;
     for (i = 0; i < HOSTMAX; i++) {
         if (e->socks[i].sockfd == sockfd) {
-            e->change = 1;
             emptyHost(e, i);
             close(sockfd);
             return 1;
@@ -131,5 +148,60 @@ int delThread(struct Engine *e, pthread_t tid) {
         }
     }
     return -1;
+}
+
+int overwriteHostFiles(struct Host *h, char *buff, int size){
+    if(h == NULL || buff == NULL || size == 0){
+        return -1;
+    }
+    
+    if(h->files != NULL){
+        free(h->files);
+        h->files = NULL;
+    }
+    
+    if((h->files = (char *) malloc (size + 1)) == NULL){
+        return -1;
+    }
+    bzero(h->files, sizeof(h->files));
+    
+    strncpy(h->files, buff, size);
+    return 1;
+}
+
+int overwriteHostFilesBySockFD(struct Engine *e, int sockfd, char *buff, int size) {
+    if (e == NULL) {
+        return -1;
+    }
+    int i;
+    for (i = 0; i < HOSTMAX; i++) {
+        if (e->socks[i].sockfd == sockfd) {
+            int io = overwriteHostFiles(&(e->socks[i]), buff, size);
+            if(io == 1){
+                e->change = 1;
+            }
+            return io;
+        }
+    }
+    return -1;
+}
+
+int buffFiles(struct Engine *e, char *buff, int buffSize){
+    if(buffSize < 12000 || e == NULL){
+        return -1;
+    }
+    int i;
+    bzero(buff, buffSize);
+    strcpy(buff, "----------------------File Ledger-------------------------------------\n");
+    strcat(buff, "File name || File size KB || File owner || Owner IP || Owner Port\n");
+    for(i = 0; i < HOSTMAX; i++){
+        if(e->socks[i].files != NULL){
+            char tmp[1024];
+            bzero(tmp, sizeof(tmp));
+            int len = BUFF(tmp, sizeof(tmp), "%s", e->socks[i].files);
+            strncat(buff, tmp, len);
+        }
+    }
+    strcat(buff, "----------------------End Of File Ledger------------------------------\n");
 }
 
