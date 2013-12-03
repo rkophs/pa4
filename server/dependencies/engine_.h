@@ -95,7 +95,7 @@ void *engineThread(void *args) {
 
     //Set up timeout:
     struct timeval tv;
-    tv.tv_sec = 100;
+    tv.tv_sec = 10;
     tv.tv_usec = 0;
     setsockopt(newSock, SOL_SOCKET, SO_RCVTIMEO, (char *) &tv, sizeof (struct timeval));
 
@@ -123,16 +123,22 @@ void *engineThread(void *args) {
     //Receive file listing from client:
     if ((len = recvDecrypt(newSock, buff, sizeof (buff), 0)) > 0) {
         pthread_mutex_lock(&engineLock);
-        if (overwriteHostFilesBySockFD(e, newSock, buff, len) < 0) {
+        int io = overwriteHostFilesBySockFD(e, newSock, buff, len);
+        pthread_mutex_unlock(&engineLock);
+        if (io < 0) {
             printf("Error copying files\n");
             pthread_exit((void*) 0);
             close(newSock);
             return;
         }
-        printFiles(e);
-        pthread_mutex_unlock(&engineLock);
     }
-
+    char fileBuff[12000];
+    bzero(fileBuff, sizeof(fileBuff));
+    pthread_mutex_lock(&engineLock);
+    buffFiles(e, fileBuff, sizeof(fileBuff));
+    pthread_mutex_unlock(&engineLock);
+    printf("%s",fileBuff);
+    
     //Now setup interaction loop:
     while (1) {
         bzero(buff, buffSize);
@@ -205,13 +211,12 @@ int engineRun(struct Engine *e) {
 
             //Spawn off a thread to deal with new connection:
             pthread_mutex_lock(&engineLock);
-            struct EngineArgs *ea;
-            ea->e = e;
-            ea->newSock = newSock;
-            ea->addr = addr_buf;
-            
+            struct EngineArgs ea;
+            ea.e = e;
+            ea.newSock = newSock;
+            ea.addr = addr_buf;
             pthread_mutex_unlock(&engineLock);
-            if (pthread_create(&tid, NULL, &engineThread, ea) != 0) {
+            if (pthread_create(&tid, NULL, &engineThread, &ea) != 0) {
                 printf("Error spawning new engine thread\n");
                 return -1;
             }

@@ -47,6 +47,7 @@ void emptyHost(struct Engine *e, int it) {
 
     //emptyHostFiles(&(e->socks[it]));
     if(e->socks[it].files != NULL){
+        e->change = 1;
         free(e->socks[it].files);
         e->socks[it].files = NULL;
     }
@@ -73,7 +74,6 @@ int initHost(struct Engine *e, int it, char * name, int nameSize, int sockfd, pt
         bzero(e->socks[it].name, sizeof (e->socks[it].name));
         strncpy(e->socks[it].name, name, nameSize);
         add++;
-        e->change = 1;
     }
 
     if (sockfd > 0) {
@@ -131,7 +131,6 @@ int delSock(struct Engine *e, int sockfd) {
     int i;
     for (i = 0; i < HOSTMAX; i++) {
         if (e->socks[i].sockfd == sockfd) {
-            e->change = 1;
             emptyHost(e, i);
             close(sockfd);
             return 1;
@@ -152,7 +151,7 @@ int delThread(struct Engine *e, pthread_t tid) {
 }
 
 int overwriteHostFiles(struct Host *h, char *buff, int size){
-    if(h == NULL){
+    if(h == NULL || buff == NULL || size == 0){
         return -1;
     }
     
@@ -177,24 +176,32 @@ int overwriteHostFilesBySockFD(struct Engine *e, int sockfd, char *buff, int siz
     int i;
     for (i = 0; i < HOSTMAX; i++) {
         if (e->socks[i].sockfd == sockfd) {
-            return overwriteHostFiles(&(e->socks[i]), buff, size);
+            int io = overwriteHostFiles(&(e->socks[i]), buff, size);
+            if(io == 1){
+                e->change = 1;
+            }
+            return io;
         }
     }
     return -1;
 }
 
-void printFiles(struct Engine *e){
-    if(e == NULL){
-        return;
+int buffFiles(struct Engine *e, char *buff, int buffSize){
+    if(buffSize < 12000 || e == NULL){
+        return -1;
     }
     int i;
-    printf("----------------------File Ledger-------------------------------------\n");
-    printf("File name || File size KB || File owner || Owner IP || Owner Port\n");
+    bzero(buff, buffSize);
+    strcpy(buff, "----------------------File Ledger-------------------------------------\n");
+    strcat(buff, "File name || File size KB || File owner || Owner IP || Owner Port\n");
     for(i = 0; i < HOSTMAX; i++){
         if(e->socks[i].files != NULL){
-            printf("%s", e->socks[i].files);
+            char tmp[1024];
+            bzero(tmp, sizeof(tmp));
+            int len = BUFF(tmp, sizeof(tmp), "%s", e->socks[i].files);
+            strncat(buff, tmp, len);
         }
     }
-    printf("----------------------End Of File Ledger------------------------------\n");
+    strcat(buff, "----------------------End Of File Ledger------------------------------\n");
 }
 
