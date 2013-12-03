@@ -58,6 +58,18 @@ void engineSendStatus(int sockfd, int ok, char *ip, int ipLen) {
     sendEncrypt(sockfd, &buff, strlen(buff), 0);
 }
 
+void *engineFloodFileList(struct Engine* e, char* buff, int len) {
+    if (e == NULL) {
+        return;
+    }
+    int i;
+    for (i = 0; i < HOSTMAX; i++) {
+        if (e->socks[i].name != NULL && e->socks[i].sockfd > 0) {
+            sendEncrypt(e->socks[i].sockfd, buff, len, 0);
+        }
+    }
+}
+
 void *engineSync(void *arg) {
     pthread_mutex_lock(&engineLock);
     struct Engine *e = arg;
@@ -70,9 +82,12 @@ void *engineSync(void *arg) {
         int change = e->change;
         pthread_mutex_unlock(&engineLock);
         if (change) {
-            printf("Sending updated file ledger to clients\n");
-            //Send list out here;
+            char fileBuff[12000];
+            bzero(fileBuff, sizeof (fileBuff));
+
             pthread_mutex_lock(&engineLock);
+            buffFiles(e, fileBuff, sizeof (fileBuff));
+            engineFloodFileList(e, fileBuff, strlen(fileBuff));
             e->change = 0;
             pthread_mutex_unlock(&engineLock);
         }
@@ -132,19 +147,20 @@ void *engineThread(void *args) {
             return;
         }
     }
-    char fileBuff[12000];
-    bzero(fileBuff, sizeof(fileBuff));
-    pthread_mutex_lock(&engineLock);
-    buffFiles(e, fileBuff, sizeof(fileBuff));
-    pthread_mutex_unlock(&engineLock);
-    printf("%s",fileBuff);
-    
+
     //Now setup interaction loop:
     while (1) {
         bzero(buff, buffSize);
         if ((len = recvDecrypt(newSock, buff, buffSize, 0)) > 0) {
             if (!strncmp(buff, "LS        ", 8)) {
-                printf("LS received\n");
+                char fileBuff[12000];
+                bzero(fileBuff, sizeof(fileBuff));
+                
+                pthread_mutex_lock(&engineLock);
+                buffFiles(e, fileBuff, sizeof (fileBuff));
+                pthread_mutex_unlock(&engineLock);
+                
+                sendEncrypt(newSock, fileBuff, strlen(fileBuff), 0);
             } else if (!strncmp(buff, "GET     ", 8)) {
                 printf("GET received\n");
             } else if (!strncmp(buff, "QUIT    ", 8)) {
