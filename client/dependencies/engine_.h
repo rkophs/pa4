@@ -12,6 +12,7 @@ struct Engine {
     pthread_t tid[HOSTMAX];
     int tidCount;
     int quit;
+    char *addr;
 };
 
 void releaseEngine(struct Engine *e) {
@@ -20,6 +21,10 @@ void releaseEngine(struct Engine *e) {
     }
     if (e->args != NULL) {
         releaseArgs(e->args);
+    }
+    if(e->addr != NULL){
+        free(e->addr);
+        e->addr = NULL;
     }
     e->sockL = -1;
     e->sockServer = -1;
@@ -46,6 +51,7 @@ struct Engine *initEngine(int argc, char **argv) {
     e->sockServer = -1;
     e->tidCount = 0;
     e->quit = 0;
+    e->addr = NULL;
 
     return e;
 };
@@ -55,29 +61,63 @@ int engineSendName(struct Engine *e) {
     char buff[buffSize];
     bzero(buff, buffSize);
     strncpy(buff, e->args->clientName, buffSize - 1);
-    return send(e->sockServer, &buff, strlen(buff), 0);
+    return sendEncrypt(e->sockServer, &buff, strlen(buff), 0);
 }
 
-int engineRecvOK(struct Engine *e) {
+int engineRecvOK(struct Engine *e, char *ip, int *ipLen) {
 
-    int buffSize = 32;
+    int buffSize = 1024;
     char buff[buffSize];
     bzero(buff, buffSize);
 
     int len;
-    if ((len = recv(e->sockServer, buff, buffSize, 0)) > 0) {
-        printf("Server responded: %s\n", buff);
+    if ((len = recvDecrypt(e->sockServer, buff, buffSize, 0)) > 0) {
         if (!strncmp(buff, "ERROR   ", 8)) {
             printf("Name already exists in server's director...Closing...\n");
             return 0;
         }
-        return 1;
+        if(*ipLen < INET_ADDRSTRLEN){
+            return -1;
+        }
+        *ipLen = len;
+        strncpy(ip, buff, INET_ADDRSTRLEN);
+        return len;
     }
     return -1;
 }
 
 void *engineListenThread(void *arg) {
     struct Engine *e = arg;
+}
+
+int engineSendFileListing(int sockfd, char *ip, int len, int port){
+    int buffSize = 1024;
+    char buff[buffSize];
+    bzero(buff, buffSize);
+    char p[8];
+    bzero(p, 8);
+    sprintf(p, "%i", port);
+    
+    FILE *fp;
+    char cmd[1024];
+    bzero(cmd, sizeof(cmd));
+    strcpy(cmd, "/bin/ls -kl | /usr/bin/awk '{if(NR>1)print $9 \" || \" $5 \" KB || ");
+    strncat(cmd, ip, len);
+    strcat(cmd, " || ");
+    strcat(cmd, p);
+    strcat(cmd, " \" }'");
+    if((fp = popen(cmd, "r")) == NULL) {
+        printf("Failed to parse file listing.\n");
+        return -1;
+    }
+    if(fread(buff, sizeof(char), buffSize, fp) < 0){
+        printf("Failed to parse file listing.\n");
+        pclose(fp);
+        return -1;
+    }
+    pclose(fp);
+    
+    return sendEncrypt(sockfd, buff, strlen(buff), 0);
 }
 
 int engineStart(struct Engine *e) {
@@ -104,11 +144,22 @@ int engineStart(struct Engine *e) {
     }
 
     //Receive response to server:
-    int status = engineRecvOK(e);
+    char addr[INET_ADDRSTRLEN];
+    int len = INET_ADDRSTRLEN;
+    int status = engineRecvOK(e, addr, &len);
+    if((e->addr = (char*) malloc (INET_ADDRSTRLEN)) == NULL){
+        return -1;
+    }
+    strncpy(e->addr, addr, INET_ADDRSTRLEN);
     if (status < 0) {
         printf("Error getting response from server...Closing...\n");
         return -1;
     } else if (status == 0) {
+        return -1;
+    }
+    
+    if(engineSendFileListing(e->sockServer, e->addr, strlen(e->addr), e->args->srcPort) < 0){
+        printf("Error sending file listing to server...Closing...\n");
         return -1;
     }
 
@@ -147,7 +198,7 @@ int engineRun(struct Engine *e) {
             printf("LS being sent\n");
         } else if (!strncmp(buff, "kill p2p", 8)) {
             printf("Sending command to kill server\n");
-            send(sockServer, "QUIT    ", 8, 0);
+            sendEncrypt(sockServer, "QUIT    ", 8, 0);
             close(sockServer);
             pthread_mutex_lock(&engineLock);
             e->quit = 1;

@@ -46,19 +46,22 @@ struct Engine *initEngine(int argc, char **argv) {
     return e;
 };
 
-void engineSendStatus(int sockfd, int ok) {
-    int buffSize = 8;
+void engineSendStatus(int sockfd, int ok, char *ip, int ipLen) {
+    int buffSize = ipLen + 1;
     char buff[buffSize];
     bzero(buff, buffSize);
-    ok ? strcpy(buff, "OK      ") : strcpy(buff, "ERROR   ");
-    send(sockfd, &buff, strlen(buff), 0);
+    if (ok) {
+        strncpy(buff, ip, ipLen);
+    } else {
+        strcpy(buff, "ERROR   ");
+    }
+    sendEncrypt(sockfd, &buff, strlen(buff), 0);
 }
 
 void *engineSync(void *arg) {
     pthread_mutex_lock(&engineLock);
     struct Engine *e = arg;
     addThread(e, pthread_self());
-    printf("sock count: %i\n", e->threadCount);
     pthread_mutex_unlock(&engineLock);
 
     while (1) {
@@ -74,11 +77,11 @@ void *engineSync(void *arg) {
             pthread_mutex_unlock(&engineLock);
         }
     }
-    
+
     pthread_mutex_lock(&engineLock);
     delThread(e, pthread_self());
     pthread_mutex_unlock(&engineLock);
-    
+
     pthread_exit((void*) 0);
 }
 
@@ -87,39 +90,53 @@ void *engineThread(void *args) {
     struct EngineArgs *ea = args;
     struct Engine *e = ea->e;
     int newSock = ea->newSock;
+    char *addr = ea->addr;
     pthread_mutex_unlock(&engineLock);
 
     //Set up timeout:
     struct timeval tv;
-    tv.tv_sec = 5;
+    tv.tv_sec = 100;
     tv.tv_usec = 0;
     setsockopt(newSock, SOL_SOCKET, SO_RCVTIMEO, (char *) &tv, sizeof (struct timeval));
 
     //Now get name and add appropriately to list of names:
-    int buffSize = 32;
+    int buffSize = 1024;
     char buff[buffSize];
     bzero(buff, buffSize);
     int len;
-    if ((len = recv(newSock, buff, sizeof (buff), 0)) > 0) {
+    if ((len = recvDecrypt(newSock, buff, sizeof (buff), 0)) > 0) {
         pthread_mutex_lock(&engineLock);
         int status = addSock(e, buff, len, newSock, pthread_self());
         pthread_mutex_unlock(&engineLock);
 
         if (status > 0) { //Successful addition
-            engineSendStatus(newSock, 1);
+            engineSendStatus(newSock, 1, addr, strlen(addr));
         } else {
-            engineSendStatus(newSock, 0);
+            engineSendStatus(newSock, 0, addr, strlen(addr));
             pthread_exit((void*) 0);
             close(newSock);
             return;
         }
     }
 
+    printf("Enter ID %i\n", newSock);
+    //Receive file listing from client:
+    if ((len = recvDecrypt(newSock, buff, sizeof (buff), 0)) > 0) {
+        pthread_mutex_lock(&engineLock);
+        if (overwriteHostFilesBySockFD(e, newSock, buff, len) < 0) {
+            printf("Error copying files\n");
+            pthread_exit((void*) 0);
+            close(newSock);
+            return;
+        }
+        printFiles(e);
+        pthread_mutex_unlock(&engineLock);
+    }
+
     //Now setup interaction loop:
-    printf("Client with socket ID %i has entered\n", newSock);
     while (1) {
         bzero(buff, buffSize);
-        if ((len = recv(newSock, buff, buffSize, 0)) > 0) {
+        if ((len = recvDecrypt(newSock, buff, buffSize, 0)) > 0) {
             if (!strncmp(buff, "LS        ", 8)) {
                 printf("LS received\n");
             } else if (!strncmp(buff, "GET     ", 8)) {
@@ -133,7 +150,7 @@ void *engineThread(void *args) {
     pthread_mutex_lock(&engineLock);
     delSock(e, newSock);
     pthread_mutex_unlock(&engineLock);
-    printf("Client with socket ID %i has exited\n", newSock);
+    printf("Exit ID %i\n", newSock);
     pthread_exit((void*) 0);
 }
 
@@ -179,11 +196,20 @@ int engineRun(struct Engine *e) {
                 return -1;
             }
 
+            char addr_buf[INET_ADDRSTRLEN];
+            bzero(addr_buf, sizeof (addr_buf));
+            if (inet_ntop(AF_INET, &cli_addr.sin_addr, addr_buf, INET_ADDRSTRLEN) == NULL) {
+                printf("Error getting address\n");
+                return -1;
+            }
+
             //Spawn off a thread to deal with new connection:
             pthread_mutex_lock(&engineLock);
             struct EngineArgs *ea;
             ea->e = e;
             ea->newSock = newSock;
+            ea->addr = addr_buf;
+            
             pthread_mutex_unlock(&engineLock);
             if (pthread_create(&tid, NULL, &engineThread, ea) != 0) {
                 printf("Error spawning new engine thread\n");

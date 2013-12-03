@@ -181,3 +181,11 @@ int bindConnector(int dstPort, char *dstIP) {
     }
     return sockfd;
 }
+
+ssize_t recvDecrypt(int sockfd, void *buf, size_t len, int flags){
+    return recv(sockfd, buf, len, flags);
+}
+
+ssize_t sendEncrypt(int sockfd, void *buf, size_t len, int flags){
+    return send(sockfd, buf, len, flags);
+}
