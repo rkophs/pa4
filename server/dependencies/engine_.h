@@ -154,17 +154,26 @@ void *engineThread(void *args) {
         if ((len = recvDecrypt(newSock, buff, buffSize, 0)) > 0) {
             if (!strncmp(buff, "LS        ", 8)) {
                 char fileBuff[12000];
-                bzero(fileBuff, sizeof(fileBuff));
-                
+                bzero(fileBuff, sizeof (fileBuff));
+
                 pthread_mutex_lock(&engineLock);
                 buffFiles(e, fileBuff, sizeof (fileBuff));
                 pthread_mutex_unlock(&engineLock);
-                
                 sendEncrypt(newSock, fileBuff, strlen(fileBuff), 0);
             } else if (!strncmp(buff, "GET     ", 8)) {
                 printf("GET received\n");
             } else if (!strncmp(buff, "QUIT    ", 8)) {
                 break;
+            } else { //File buffer
+                pthread_mutex_lock(&engineLock);
+                int io = overwriteHostFilesBySockFD(e, newSock, buff, len);
+                pthread_mutex_unlock(&engineLock);
+                if (io < 0) {
+                    printf("Error copying files\n");
+                    pthread_exit((void*) 0);
+                    close(newSock);
+                    return;
+                }
             }
         }
     }

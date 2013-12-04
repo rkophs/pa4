@@ -163,7 +163,7 @@ int overwriteHostFiles(struct Host *h, char *buff, int size){
     if((h->files = (char *) malloc (size + 1)) == NULL){
         return -1;
     }
-    bzero(h->files, sizeof(h->files));
+    bzero(h->files, size + 1);
     
     strncpy(h->files, buff, size);
     return 1;
@@ -196,10 +196,7 @@ int buffFiles(struct Engine *e, char *buff, int buffSize){
     strcat(buff, "File name || File size KB || File owner || Owner IP || Owner Port\n");
     for(i = 0; i < HOSTMAX; i++){
         if(e->socks[i].files != NULL){
-            char tmp[1024];
-            bzero(tmp, sizeof(tmp));
-            int len = BUFF(tmp, sizeof(tmp), "%s", e->socks[i].files);
-            strncat(buff, tmp, len);
+            strcat(buff, e->socks[i].files);
         }
     }
     strcat(buff, "----------------------End Of File Ledger------------------------------\n");
