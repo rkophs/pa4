@@ -15,6 +15,10 @@ struct Engine {
     char *addr;
 };
 
+struct EngineArgs {
+    int sockL;
+};
+
 void releaseEngine(struct Engine *e) {
     if (e == NULL) {
         return;
@@ -73,7 +77,7 @@ int engineRecvOK(struct Engine *e, char *ip, int *ipLen) {
     int len;
     if ((len = recvDecrypt(e->sockServer, buff, buffSize, 0)) > 0) {
         if (!strncmp(buff, "ERROR   ", 8)) {
-            printf("Name already exists in server's director...Closing...\n");
+            printf("Name already exists in server's directory...Closing...\n");
             return 0;
         }
         if (*ipLen < INET_ADDRSTRLEN) {
@@ -91,15 +95,15 @@ void *engineThread(void *arg) {
     struct Engine *e = arg;
     int sockfd = e->sockServer;
     pthread_mutex_unlock(&engineLock);
-    
-    int buffSize = 1024;
+
+    int buffSize = 12000;
     char buff[buffSize];
     bzero(buff, buffSize);
-    
+
     //Listen on server:
     int len;
     while (1) {
-        bzero(buff, sizeof(buff));
+        bzero(buff, sizeof (buff));
         if ((len = recvDecrypt(sockfd, buff, sizeof (buff), 0)) > 0) {
             printf("\nNewly received file ledger: \n%s\n\n", buff);
         }
@@ -136,6 +140,78 @@ int engineSendFileListing(int sockfd, char *ip, int len, int port) {
     return sendEncrypt(sockfd, buff, strlen(buff), 0);
 }
 
+void *engineListener(void *args) {
+    struct EngineArgs *ea = (struct EngineArgs*) args;
+    int sockL = ea->sockL;
+
+    //Empty socket struct for incoming clients;
+    struct sockaddr_in cli_addr;
+    int cli_len = sizeof (cli_addr);
+    bzero(&cli_addr, cli_len);
+
+    //Wait for new connections and tend to them:
+    while (1) {
+        int newSock;
+        bzero(&cli_addr, sizeof (cli_addr));
+        if ((newSock = accept(sockL, (struct sockaddr*) &cli_addr, &cli_len)) < 0) {
+            printf("Error accepting incoming connection\n");
+            return;
+        }
+
+        //Now get the incoming GET request from connection
+        int buffSize = 1024;
+        char buff[buffSize];
+        bzero(buff, buffSize);
+        int len;
+        if ((len = recvDecrypt(newSock, buff, sizeof (buff), 0)) > 0) {
+            char *get = strtok(buff, " ");
+            if (!strncmp(get, "GET", 3)) {
+                char *fileName = strtok(NULL, " ");
+                printf(" **Request for file %s\n", fileName);
+
+                FILE *pFile;
+                if ((pFile = fopen(fileName, "rb")) == NULL) {
+                    printf(" **Error opening file... \n");
+                    close(newSock);
+                    continue;
+                }
+
+                // obtain file size:
+                fseek(pFile, 0, SEEK_END);
+                int lSize = ftell(pFile);
+                rewind(pFile);
+
+                // allocate memory to contain the whole file:
+                char *buffer;
+                if ((buffer = (char*) malloc(sizeof (char)*lSize)) == NULL) {
+                    printf(" **Error allocating memory.\n");
+                    fclose(pFile);
+                    close(newSock);
+                    return;
+                }
+
+                // copy the file into the buffer:
+                if (fread(buffer, sizeof (char), lSize, pFile) != lSize) {
+                    printf(" **Error reading file");
+                    free(buffer);
+                    fclose(pFile);
+                    continue;
+                }
+
+                printf("Sending file of size: %i\n", lSize);
+                sendEncrypt(newSock, buffer, lSize, 0);
+
+                // terminate
+                close(newSock);
+                fclose(pFile);
+                free(buffer);
+            }
+        }
+        close(newSock);
+    }
+
+}
+
 int engineStart(struct Engine *e) {
     if (e == NULL) {
         return -1;
@@ -144,6 +220,14 @@ int engineStart(struct Engine *e) {
     //Set up listener for other peers:
     if ((e->sockL = bindListener(e->args->srcPort)) < 0) {
         printf("Error listening for peers...Closing...\n");
+        return -1;
+    }
+
+    pthread_t tid;
+    struct EngineArgs ea;
+    ea.sockL = e->sockL;
+    if (pthread_create(&tid, NULL, &engineListener, &ea) != 0) {
+        printf("Error spawning new engine thread\n");
         return -1;
     }
 
@@ -180,8 +264,8 @@ int engineStart(struct Engine *e) {
     }
 
     //Spawn a thread to listen on server;
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, &engineThread, e) != 0) {
+    pthread_t tid2;
+    if (pthread_create(&tid2, NULL, &engineThread, e) != 0) {
         printf("Error spawning new engine sync thread\n");
         return -1;
     }
@@ -190,7 +274,86 @@ int engineStart(struct Engine *e) {
 }
 
 void engineSendCmd(int sockfd, char *buff, int buffSize) {
-    send(sockfd, buff, buffSize, 0);
+    sendEncrypt(sockfd, buff, buffSize, 0);
+}
+
+int engineGet(char *cmd) {
+    if (strncmp(cmd, "get", 3)) {
+        return -1;
+    }
+    strtok(cmd, " ");
+    char *file;
+    file = strtok(NULL, " ");
+    if (file == NULL) {
+        printf("  ->Usage: get <filename> <ip> <port>\n");
+        return -1;
+    }
+    char *ip;
+    ip = strtok(NULL, " ");
+    if (ip == NULL) {
+        printf("  ->Usage: get <filename> <ip> <port>\n");
+        return -1;
+    }
+    char *p;
+    p = strtok(NULL, " ");
+    if (p == NULL) {
+        printf("  ->Usage: get <filename> <ip> <port>\n");
+        return -1;
+    }
+    int port = atoi(p);
+
+    FILE *fp;
+    if ((fp = fopen(file, "rb")) != NULL) {
+        printf(" ->This file already exists in your directory, select another one.\n");
+        fclose(fp);
+        return -1;
+    }
+    printf("Contacting %s:%i for file...\n", ip, port);
+
+    int sock;
+    if ((sock = bindConnector(port, ip)) < 0) {
+        printf("Error contacting server...Please try again later.\n");
+        return -1;
+    }
+
+    char sendCmd[128];
+    bzero(sendCmd, sizeof (bzero));
+    strcpy(sendCmd, "GET ");
+    strcat(sendCmd, file);
+    sendEncrypt(sock, sendCmd, strlen(sendCmd), 0);
+
+    //Set up timeout:
+    struct timeval tv;
+    tv.tv_sec = 10;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (char *) &tv, sizeof (struct timeval));
+
+    int len;
+    int buffSize = 1024;
+    char buff[buffSize];
+    int status = -1;
+    do {
+        bzero(buff, sizeof (buff));
+        if ((len = recvDecrypt(sock, &buff, buffSize, 0)) > 0) {
+            if (status == -1) { //Init
+                if ((fp = fopen(file, "wb")) == NULL) {
+                    printf(" **Error creating new file.\n");
+                    break;
+                }
+            }
+            status = 1;
+            int res;
+            if ((res = fwrite(buff, sizeof (char), len, fp)) != len) {
+                printf(" **Error writing to file: %i != %i\n", res, len);
+                break;
+            }
+        }
+    } while (len > 0);
+
+    if (status == 1) {
+        fclose(fp);
+    }
+    return status;
 }
 
 int engineRun(struct Engine *e) {
@@ -201,7 +364,7 @@ int engineRun(struct Engine *e) {
 
     printf("Client is set up, please enter a command:\n");
     while (1) {
-        int buffSize = 100;
+        int buffSize = 128;
         char buff[buffSize];
         bzero(buff, buffSize);
         fgets(buff, buffSize, stdin);
@@ -216,6 +379,18 @@ int engineRun(struct Engine *e) {
             e->quit = 1;
             pthread_mutex_unlock(&engineLock);
             return 1;
+        } else if (!strncmp(buff, "get", 3)) {
+            if (engineGet(buff) > 0) {
+                printf("  ->File download complete... sending updated file listing to server...\n\n");
+                pthread_mutex_lock(&engineLock);
+                if (engineSendFileListing(e->sockServer, e->addr, strlen(e->addr), e->args->srcPort) < 0) {
+                    printf("  ->Error sending file listing to server...Closing...\n");
+                    return -1;
+                }
+                pthread_mutex_unlock(&engineLock);
+            } else {
+                printf("  ->Error retrieving file... possibly because file doesn't exist on peer.\n\n");
+            }
         } else {
             printf(" ->Error: Command not found.\n\n", buff);
         }
