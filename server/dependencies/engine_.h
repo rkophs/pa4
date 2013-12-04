@@ -115,7 +115,7 @@ void *engineThread(void *args) {
     setsockopt(newSock, SOL_SOCKET, SO_RCVTIMEO, (char *) &tv, sizeof (struct timeval));
 
     //Now get name and add appropriately to list of names:
-    int buffSize = 1024;
+    int buffSize = 4096;
     char buff[buffSize];
     bzero(buff, buffSize);
     int len;
